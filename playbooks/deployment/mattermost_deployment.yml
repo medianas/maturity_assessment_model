@@ -1,0 +1,153 @@
+---
+- name: Deploy Mattermost from scratch
+  hosts: "{{ target_host | default('all') }}"
+  become: yes
+  vars:
+    mattermost_version: "9.5.0"
+    mattermost_db_name: "mattermost"
+    mattermost_db_user: "mattermost"
+    mattermost_db_password: "{{ mattermost_db_password | default('CHANGE_THIS_PASSWORD') }}"
+    mattermost_admin_user: "admin"
+    mattermost_admin_password: "{{ mattermost_admin_password | default('CHANGE_THIS_PASSWORD') }}"
+
+  tasks:
+    - name: Update package cache
+      package:
+        update_cache: yes
+      when: ansible_os_family == "Debian"
+
+    - name: Install required dependencies
+      package:
+        name:
+          - wget
+          - curl
+          - postgresql
+          - postgresql-contrib
+          - nginx
+        state: present
+
+    - name: Create PostgreSQL database
+      postgresql_db:
+        name: "{{ mattermost_db_name }}"
+        state: present
+      become_user: postgres
+
+    - name: Create PostgreSQL user
+      postgresql_user:
+        db: "{{ mattermost_db_name }}"
+        name: "{{ mattermost_db_user }}"
+        password: "{{ mattermost_db_password }}"
+        priv: "ALL"
+        state: present
+      become_user: postgres
+
+    - name: Create mattermost user
+      user:
+        name: mattermost
+        system: yes
+        shell: /bin/bash
+        home: /opt/mattermost
+        create_home: no
+
+    - name: Create mattermost directory
+      file:
+        path: /opt/mattermost
+        state: directory
+        owner: mattermost
+        group: mattermost
+        mode: '0755'
+
+    - name: Download Mattermost
+      unarchive:
+        src: "https://releases.mattermost.com/{{ mattermost_version }}/mattermost-{{ mattermost_version }}-linux-amd64.tar.gz"
+        dest: /opt
+        remote_src: yes
+        creates: "/opt/mattermost/bin/mattermost"
+
+    - name: Set proper ownership
+      file:
+        path: /opt/mattermost
+        owner: mattermost
+        group: mattermost
+        recurse: yes
+
+    - name: Create data directory
+      file:
+        path: /opt/mattermost/data
+        state: directory
+        owner: mattermost
+        group: mattermost
+        mode: '0755'
+
+    - name: Configure Mattermost database
+      template:
+        src: templates/mattermost-config.json.j2
+        dest: /opt/mattermost/config/config.json
+        owner: mattermost
+        group: mattermost
+        mode: '0644'
+
+    - name: Create systemd service file
+      template:
+        src: templates/mattermost.service.j2
+        dest: /etc/systemd/system/mattermost.service
+        mode: '0644'
+
+    - name: Enable and start Mattermost service
+      systemd:
+        name: mattermost
+        enabled: yes
+        state: started
+        daemon_reload: yes
+
+    - name: Configure Nginx as reverse proxy
+      template:
+        src: templates/mattermost-nginx.conf.j2
+        dest: /etc/nginx/sites-available/mattermost
+        mode: '0644'
+
+    - name: Enable Mattermost site
+      file:
+        src: /etc/nginx/sites-available/mattermost
+        dest: /etc/nginx/sites-enabled/mattermost
+        state: link
+
+    - name: Remove default nginx site
+      file:
+        path: /etc/nginx/sites-enabled/default
+        state: absent
+
+    - name: Restart Nginx
+      service:
+        name: nginx
+        state: restarted
+
+    - name: Wait for Mattermost to be ready
+      uri:
+        url: "http://localhost:8065"
+        method: GET
+      register: mattermost_status
+      until: mattermost_status.status == 200
+      retries: 30
+      delay: 5
+
+    - name: Create initial admin user
+      uri:
+        url: "http://localhost:8065/api/v4/users"
+        method: POST
+        body_format: json
+        body:
+          username: "{{ mattermost_admin_user }}"
+          password: "{{ mattermost_admin_password }}"
+          email: "admin@example.com"
+        status_code: 201
+      when: mattermost_status.status == 200
+
+    - name: Display Mattermost access information
+      debug:
+        msg:
+          - "Mattermost deployed successfully!"
+          - "URL: http://{{ ansible_hostname }}"
+          - "Admin user: {{ mattermost_admin_user }}"
+          - "Admin password: {{ mattermost_admin_password }}"
+          - "Please change the admin password after first login"

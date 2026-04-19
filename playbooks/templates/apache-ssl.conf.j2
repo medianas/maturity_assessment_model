@@ -1,0 +1,13 @@
+<VirtualHost *:443>
+    ServerName {{ ansible_hostname }}
+    DocumentRoot /var/www/html
+
+    SSLEngine on
+    SSLCertificateFile {{ ssl_cert_path }}
+    SSLCertificateKeyFile {{ ssl_key_path }}
+
+    <Directory /var/www/html>
+        AllowOverride All
+        Require all granted
+    </Directory>
+</VirtualHost>

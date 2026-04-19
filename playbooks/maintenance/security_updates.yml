@@ -1,0 +1,50 @@
+---
+- name: Apply security updates
+  hosts: "{{ target_host | default('all') }}"
+  become: yes
+
+  tasks:
+    - name: Update package cache
+      package:
+        update_cache: yes
+      when: ansible_os_family == "Debian"
+
+    - name: Update package cache (RedHat)
+      package:
+        update_cache: yes
+      when: ansible_os_family == "RedHat"
+
+    - name: Upgrade all packages
+      package:
+        name: "*"
+        state: latest
+
+    - name: Check for reboot required
+      stat:
+        path: /var/run/reboot-required
+      register: reboot_required
+      when: ansible_os_family == "Debian"
+
+    - name: Reboot if required
+      reboot:
+        msg: "Rebooting after security updates"
+      when: reboot_required.stat.exists
+
+    - name: Check for pending reboot (RedHat)
+      command: needs-restarting -r
+      register: needs_restarting
+      ignore_errors: yes
+      when: ansible_os_family == "RedHat"
+
+    - name: Reboot if required (RedHat)
+      reboot:
+        msg: "Rebooting after security updates"
+      when: ansible_os_family == "RedHat" and needs_restarting.rc == 1
+
+    - name: Clean package cache
+      command: apt-get autoremove -y
+      when: ansible_os_family == "Debian"
+
+    - name: Clean package cache (RedHat)
+      command: yum autoremove -y
+      when: ansible_os_family == "RedHat"

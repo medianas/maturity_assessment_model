@@ -1,0 +1,64 @@
+require 'net/http'
+require 'json'
+
+module RedmineMattermost
+  class Notifier
+    def self.notify_issue_created(issue)
+      send_notification("New issue created: ##{issue.id} - #{issue.subject}",
+                       "#{@redmine_url}/issues/#{issue.id}")
+    end
+
+    def self.notify_issue_updated(issue)
+      send_notification("Issue updated: ##{issue.id} - #{issue.subject}",
+                       "#{@redmine_url}/issues/#{issue.id}")
+    end
+
+    def self.notify_issue_closed(issue)
+      send_notification("Issue closed: ##{issue.id} - #{issue.subject}",
+                       "#{@redmine_url}/issues/#{issue.id}")
+    end
+
+    private
+
+    def self.send_notification(text, issue_url)
+      uri = URI("{{ mattermost_url }}/hooks/{{ mattermost_webhook_id }}")
+      http = Net::HTTP.new(uri.host, uri.port)
+      http.use_ssl = true
+
+      request = Net::HTTP::Post.new(uri)
+      request['Content-Type'] = 'application/json'
+
+      payload = {
+        text: text,
+        attachments: [
+          {
+            title: "View Issue",
+            title_link: issue_url
+          }
+        ]
+      }
+
+      request.body = payload.to_json
+      response = http.request(request)
+
+      Rails.logger.info("Mattermost notification sent: #{response.code}")
+    end
+  end
+end
+
+# Hook into Redmine events
+class MattermostHook < Redmine::Hook::Listener
+  def controller_issues_new_after_save(context)
+    RedmineMattermost::Notifier.notify_issue_created(context[:issue])
+  end
+
+  def controller_issues_edit_after_save(context)
+    RedmineMattermost::Notifier.notify_issue_updated(context[:issue])
+  end
+
+  def controller_issues_bulk_edit_after_save(context)
+    context[:issues].each do |issue|
+      RedmineMattermost::Notifier.notify_issue_updated(issue)
+    end
+  end
+end

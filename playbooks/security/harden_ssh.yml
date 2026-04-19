@@ -1,0 +1,91 @@
+---
+- name: Harden SSH configuration
+  hosts: "{{ target_host | default('all') }}"
+  become: yes
+
+  tasks:
+    - name: Backup original SSH config
+      copy:
+        src: /etc/ssh/sshd_config
+        dest: /etc/ssh/sshd_config.backup
+        remote_src: yes
+
+    - name: Disable root login
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: "^#?PermitRootLogin"
+        line: "PermitRootLogin no"
+        state: present
+
+    - name: Disable password authentication
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: "^#?PasswordAuthentication"
+        line: "PasswordAuthentication no"
+        state: present
+
+    - name: Enable public key authentication
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: "^#?PubkeyAuthentication"
+        line: "PubkeyAuthentication yes"
+        state: present
+
+    - name: Set MaxAuthTries
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: "^#?MaxAuthTries"
+        line: "MaxAuthTries 3"
+        state: present
+
+    - name: Disable X11 forwarding
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: "^#?X11Forwarding"
+        line: "X11Forwarding no"
+        state: present
+
+    - name: Set ClientAliveInterval
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: "^#?ClientAliveInterval"
+        line: "ClientAliveInterval 300"
+        state: present
+
+    - name: Set ClientAliveCountMax
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: "^#?ClientAliveCountMax"
+        line: "ClientAliveCountMax 2"
+        state: present
+
+    - name: Use strong ciphers
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: "^#?Ciphers"
+        line: "Ciphers aes256-gcm@openssh.com,chacha20-poly1305@openssh.com,aes256-ctr,aes192-ctr,aes128-ctr"
+        state: present
+
+    - name: Use strong MACs
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: "^#?MACs"
+        line: "MACs hmac-sha2-512-etm@openssh.com,hmac-sha2-256-etm@openssh.com,hmac-sha2-512,hmac-sha2-256"
+        state: present
+
+    - name: Use strong KexAlgorithms
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: "^#?KexAlgorithms"
+        line: "KexAlgorithms curve25519-sha256@libssh.org,ecdh-sha2-nistp521,ecdh-sha2-nistp384,ecdh-sha2-nistp256,diffie-hellman-group-exchange-sha256"
+        state: present
+
+    - name: Validate SSH config
+      command: sshd -t
+      register: sshd_test
+
+    - name: Restart SSH service
+      service:
+        name: sshd
+        state: restarted
+      when: sshd_test.rc == 0

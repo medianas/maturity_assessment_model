@@ -1,0 +1,76 @@
+---
+- name: Enable HTTPS on web server
+  hosts: "{{ target_host | default('all') }}"
+  become: yes
+  vars:
+    ssl_cert_path: "/etc/ssl/certs/{{ ansible_hostname }}.pem"
+    ssl_key_path: "/etc/ssl/private/{{ ansible_hostname }}.key"
+    web_server: "{{ web_server_type | default('apache2') }}"
+
+  tasks:
+    - name: Install required packages
+      package:
+        name:
+          - "{{ web_server }}"
+          - openssl
+          - certbot
+        state: present
+      when: ansible_os_family == "Debian"
+
+    - name: Install required packages (RedHat)
+      package:
+        name:
+          - "{{ web_server }}"
+          - openssl
+          - certbot
+        state: present
+      when: ansible_os_family == "RedHat"
+
+    - name: Generate self-signed SSL certificate
+      openssl_certificate:
+        path: "{{ ssl_cert_path }}"
+        privatekey_path: "{{ ssl_key_path }}"
+        provider: selfsigned
+        force: no
+      notify: restart web server
+
+    - name: Configure Apache for HTTPS
+      template:
+        src: templates/apache-ssl.conf.j2
+        dest: "/etc/{{ web_server }}/sites-available/{{ ansible_hostname }}-ssl.conf"
+      when: web_server == "apache2"
+      notify: restart web server
+
+    - name: Enable SSL site
+      command: a2ensite {{ ansible_hostname }}-ssl
+      when: web_server == "apache2"
+      notify: restart web server
+
+    - name: Configure Nginx for HTTPS
+      template:
+        src: templates/nginx-ssl.conf.j2
+        dest: "/etc/nginx/sites-available/{{ ansible_hostname }}-ssl"
+      when: web_server == "nginx"
+      notify: restart web server
+
+    - name: Enable Nginx site
+      file:
+        src: "/etc/nginx/sites-available/{{ ansible_hostname }}-ssl"
+        dest: "/etc/nginx/sites-enabled/{{ ansible_hostname }}-ssl"
+        state: link
+      when: web_server == "nginx"
+      notify: restart web server
+
+    - name: Disable HTTP redirect to HTTPS
+      lineinfile:
+        path: "/etc/{{ web_server }}/sites-available/{{ ansible_hostname }}"
+        regexp: "^.*redirect.*$"
+        line: "Redirect permanent / https://{{ ansible_hostname }}/"
+        state: present
+      when: web_server == "apache2"
+
+  handlers:
+    - name: restart web server
+      service:
+        name: "{{ web_server }}"
+        state: restarted

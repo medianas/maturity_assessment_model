@@ -1,0 +1,13 @@
+<VirtualHost *:80>
+    ServerName {{ ansible_hostname }}
+    DocumentRoot /opt/redmine/public
+
+    <Directory /opt/redmine/public>
+        AllowOverride all
+        Options -MultiViews
+        Require all granted
+    </Directory>
+
+    ErrorLog ${APACHE_LOG_DIR}/redmine_error.log
+    CustomLog ${APACHE_LOG_DIR}/redmine_access.log combined
+</VirtualHost>

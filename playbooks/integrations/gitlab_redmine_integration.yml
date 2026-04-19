@@ -1,0 +1,65 @@
+---
+- name: Configure GitLab-Redmine integration
+  hosts: "{{ target_host | default('all') }}"
+  become: yes
+  vars:
+    redmine_url: "{{ redmine_url | default('https://redmine.example.com') }}"
+    redmine_api_key: "{{ redmine_api_key | default('YOUR_REDMINE_API_KEY') }}"
+    gitlab_external_url: "{{ gitlab_external_url | default('https://gitlab.example.com') }}"
+
+  tasks:
+    - name: Install required packages for integration
+      package:
+        name:
+          - curl
+          - jq
+        state: present
+
+    - name: Create Redmine service integration in GitLab
+      uri:
+        url: "{{ gitlab_external_url }}/api/v4/projects/{{ gitlab_project_id | default('1') }}/services/redmine"
+        method: PUT
+        headers:
+          PRIVATE-TOKEN: "{{ gitlab_api_token }}"
+        body_format: json
+        body:
+          active: true
+          issues_url: "{{ redmine_url }}/issues/:id"
+          new_issue_url: "{{ redmine_url }}/projects/:project_id/issues/new"
+          project_url: "{{ redmine_url }}/projects/:project_id"
+          api_key: "{{ redmine_api_key }}"
+        status_code: 200
+
+    - name: Configure GitLab webhook to Redmine
+      uri:
+        url: "{{ gitlab_external_url }}/api/v4/projects/{{ gitlab_project_id | default('1') }}/hooks"
+        method: POST
+        headers:
+          PRIVATE-TOKEN: "{{ gitlab_api_token }}"
+        body_format: json
+        body:
+          url: "{{ redmine_url }}/gitlab_hook"
+          push_events: true
+          issues_events: true
+          merge_requests_events: true
+          tag_push_events: true
+          note_events: true
+          job_events: true
+          pipeline_events: true
+          wiki_page_events: true
+          enable_ssl_verification: true
+        status_code: 201
+
+    - name: Test GitLab-Redmine integration
+      uri:
+        url: "{{ gitlab_external_url }}/api/v4/projects/{{ gitlab_project_id | default('1') }}/services/redmine"
+        method: GET
+        headers:
+          PRIVATE-TOKEN: "{{ gitlab_api_token }}"
+        return_content: yes
+      register: integration_status
+
+    - name: Display integration status
+      debug:
+        msg: "GitLab-Redmine integration configured successfully"
+      when: integration_status.status == 200

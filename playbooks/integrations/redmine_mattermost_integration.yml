@@ -1,0 +1,90 @@
+---
+- name: Configure Redmine-Mattermost integration
+  hosts: "{{ target_host | default('all') }}"
+  become: yes
+  vars:
+    redmine_url: "{{ redmine_url | default('https://redmine.example.com') }}"
+    mattermost_url: "{{ mattermost_url | default('https://mattermost.example.com') }}"
+    mattermost_token: "{{ mattermost_token | default('YOUR_MATTERMOST_TOKEN') }}"
+    mattermost_channel: "{{ mattermost_channel | default('redmine-notifications') }}"
+
+  tasks:
+    - name: Install required packages
+      package:
+        name:
+          - curl
+          - jq
+        state: present
+
+    - name: Create Mattermost channel for Redmine notifications
+      uri:
+        url: "{{ mattermost_url }}/api/v4/channels"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ mattermost_token }}"
+        body_format: json
+        body:
+          team_id: "{{ mattermost_team_id }}"
+          name: "{{ mattermost_channel }}"
+          display_name: "Redmine Notifications"
+          type: "O"
+        status_code: 201
+      register: channel_creation
+
+    - name: Get channel ID
+      set_fact:
+        channel_id: "{{ channel_creation.json.id }}"
+      when: channel_creation.status == 201
+
+    - name: Create Mattermost incoming webhook for Redmine
+      uri:
+        url: "{{ mattermost_url }}/api/v4/hooks/incoming"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ mattermost_token }}"
+        body_format: json
+        body:
+          channel_id: "{{ channel_id | default(mattermost_channel) }}"
+          display_name: "Redmine Integration"
+          description: "Webhook for Redmine notifications"
+        status_code: 201
+      register: webhook_creation
+
+    - name: Configure Redmine webhook plugin (if installed)
+      uri:
+        url: "{{ redmine_url }}/settings/plugin/redmine_webhook"
+        method: POST
+        headers:
+          X-Redmine-API-Key: "{{ redmine_api_key }}"
+        body_format: form-urlencoded
+        body:
+          settings[webhooks][0][url]: "{{ mattermost_url }}/hooks/{{ webhook_creation.json.id }}"
+          settings[webhooks][0][active]: "1"
+          settings[webhooks][0][events]: "issue_added,issue_updated,issue_closed"
+        status_code: 200
+      when: webhook_creation.status == 201
+
+    - name: Create custom script for Redmine-Mattermost notifications
+      template:
+        src: templates/redmine_mattermost_script.rb.j2
+        dest: /opt/redmine/plugins/redmine_mattermost_integration/lib/redmine_mattermost.rb
+        mode: '0644'
+      when: "'redmine' in group_names"
+
+    - name: Restart Redmine (Passenger)
+      command: touch /opt/redmine/tmp/restart.txt
+      when: "'redmine' in group_names"
+
+    - name: Test Redmine-Mattermost integration
+      uri:
+        url: "{{ mattermost_url }}/api/v4/hooks/incoming"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ mattermost_token }}"
+        return_content: yes
+      register: webhook_test
+
+    - name: Display integration status
+      debug:
+        msg: "Redmine-Mattermost integration configured successfully"
+      when: webhook_test.status == 200

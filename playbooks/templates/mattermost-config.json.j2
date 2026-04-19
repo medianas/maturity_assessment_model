@@ -1,0 +1,31 @@
+{
+    "ServiceSettings": {
+        "ListenAddress": ":8065",
+        "ConnectionSecurity": "",
+        "TLSCertFile": "",
+        "TLSKeyFile": ""
+    },
+    "TeamSettings": {
+        "SiteName": "Mattermost"
+    },
+    "SqlSettings": {
+        "DriverName": "postgres",
+        "DataSource": "postgres://{{ mattermost_db_user }}:{{ mattermost_db_password }}@localhost:5432/{{ mattermost_db_name }}?sslmode=disable&connect_timeout=10"
+    },
+    "FileSettings": {
+        "Directory": "/opt/mattermost/data/"
+    },
+    "EmailSettings": {
+        "SendEmailNotifications": false,
+        "FeedbackEmail": "",
+        "ReplyToAddress": "",
+        "SMTPServer": "",
+        "SMTPPort": "",
+        "SMTPUsername": "",
+        "SMTPPassword": "",
+        "ConnectionSecurity": "",
+        "InviteSalt": "",
+        "PasswordResetSalt": "",
+        "SendPushNotifications": false
+    }
+}

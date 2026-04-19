@@ -1,0 +1,147 @@
+---
+- name: Deploy Redmine from scratch
+  hosts: "{{ target_host | default('all') }}"
+  become: yes
+  vars:
+    redmine_version: "5.0.5"
+    redmine_db_name: "redmine"
+    redmine_db_user: "redmine"
+    redmine_db_password: "{{ redmine_db_password | default('CHANGE_THIS_PASSWORD') }}"
+    redmine_admin_user: "admin"
+    redmine_admin_password: "{{ redmine_admin_password | default('CHANGE_THIS_PASSWORD') }}"
+
+  tasks:
+    - name: Update package cache
+      package:
+        update_cache: yes
+      when: ansible_os_family == "Debian"
+
+    - name: Install required dependencies
+      package:
+        name:
+          - build-essential
+          - libssl-dev
+          - libreadline-dev
+          - zlib1g-dev
+          - libsqlite3-dev
+          - libpq-dev
+          - libxml2-dev
+          - libxslt1-dev
+          - imagemagick
+          - libmagickwand-dev
+          - curl
+          - wget
+          - subversion
+          - git
+          - apache2
+          - libapache2-mod-passenger
+          - postgresql
+          - postgresql-contrib
+          - libpq-dev
+        state: present
+
+    - name: Install Ruby
+      package:
+        name: ruby-full
+        state: present
+
+    - name: Install Bundler
+      gem:
+        name: bundler
+        state: present
+        user_install: no
+
+    - name: Create PostgreSQL database
+      postgresql_db:
+        name: "{{ redmine_db_name }}"
+        state: present
+      become_user: postgres
+
+    - name: Create PostgreSQL user
+      postgresql_user:
+        db: "{{ redmine_db_name }}"
+        name: "{{ redmine_db_user }}"
+        password: "{{ redmine_db_password }}"
+        priv: "ALL"
+        state: present
+      become_user: postgres
+
+    - name: Download Redmine
+      unarchive:
+        src: "https://www.redmine.org/releases/redmine-{{ redmine_version }}.tar.gz"
+        dest: /opt
+        remote_src: yes
+        creates: "/opt/redmine-{{ redmine_version }}"
+
+    - name: Create symlink to Redmine
+      file:
+        src: "/opt/redmine-{{ redmine_version }}"
+        dest: /opt/redmine
+        state: link
+
+    - name: Configure Redmine database
+      template:
+        src: templates/database.yml.j2
+        dest: /opt/redmine/config/database.yml
+        mode: '0644'
+
+    - name: Install Redmine dependencies
+      bundler:
+        state: present
+        chdir: /opt/redmine
+        executable: /usr/local/bin/bundle
+
+    - name: Generate Redmine secret token
+      command: bundle exec rake generate_secret_token
+      args:
+        chdir: /opt/redmine
+
+    - name: Create Redmine database structure
+      command: RAILS_ENV=production bundle exec rake db:migrate
+      args:
+        chdir: /opt/redmine
+
+    - name: Load default data
+      command: RAILS_ENV=production REDMINE_LANG=en bundle exec rake redmine:load_default_data
+      args:
+        chdir: /opt/redmine
+
+    - name: Create admin user
+      command: >
+        RAILS_ENV=production bundle exec rake redmine:create_admin_user
+        USERNAME={{ redmine_admin_user }}
+        PASSWORD={{ redmine_admin_password }}
+        EMAIL=admin@example.com
+      args:
+        chdir: /opt/redmine
+
+    - name: Configure Apache for Redmine
+      template:
+        src: templates/redmine-apache.conf.j2
+        dest: /etc/apache2/sites-available/redmine.conf
+
+    - name: Enable Redmine site
+      command: a2ensite redmine
+      notify: restart apache
+
+    - name: Enable Passenger module
+      command: a2enmod passenger
+      notify: restart apache
+
+    - name: Set proper permissions
+      file:
+        path: /opt/redmine
+        owner: www-data
+        group: www-data
+        recurse: yes
+
+    - name: Restart Apache
+      service:
+        name: apache2
+        state: restarted
+
+  handlers:
+    - name: restart apache
+      service:
+        name: apache2
+        state: restarted

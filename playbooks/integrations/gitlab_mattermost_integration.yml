@@ -1,0 +1,104 @@
+---
+- name: Configure GitLab-Mattermost integration
+  hosts: "{{ target_host | default('all') }}"
+  become: yes
+  vars:
+    mattermost_url: "{{ mattermost_url | default('https://mattermost.example.com') }}"
+    mattermost_token: "{{ mattermost_token | default('YOUR_MATTERMOST_TOKEN') }}"
+    gitlab_external_url: "{{ gitlab_external_url | default('https://gitlab.example.com') }}"
+    mattermost_channel: "{{ mattermost_channel | default('gitlab-notifications') }}"
+
+  tasks:
+    - name: Install required packages
+      package:
+        name:
+          - curl
+          - jq
+        state: present
+
+    - name: Create Mattermost channel for GitLab notifications
+      uri:
+        url: "{{ mattermost_url }}/api/v4/channels"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ mattermost_token }}"
+        body_format: json
+        body:
+          team_id: "{{ mattermost_team_id }}"
+          name: "{{ mattermost_channel }}"
+          display_name: "GitLab Notifications"
+          type: "O"
+        status_code: 201
+      register: channel_creation
+
+    - name: Get channel ID
+      set_fact:
+        channel_id: "{{ channel_creation.json.id }}"
+      when: channel_creation.status == 201
+
+    - name: Configure GitLab Mattermost service
+      uri:
+        url: "{{ gitlab_external_url }}/api/v4/projects/{{ gitlab_project_id | default('1') }}/services/mattermost"
+        method: PUT
+        headers:
+          PRIVATE-TOKEN: "{{ gitlab_api_token }}"
+        body_format: json
+        body:
+          active: true
+          webhook: "{{ mattermost_url }}/hooks/{{ mattermost_webhook_id }}"
+          username: "GitLab"
+          channel: "{{ mattermost_channel }}"
+          notify_only_broken_pipelines: false
+          notify_only_default_branch: false
+          branches_to_be_notified: "all"
+          confidential_issues_events: false
+          merge_requests_events: true
+          tag_push_events: true
+          note_events: true
+          confidential_note_events: false
+          pipeline_events: true
+          wiki_page_events: true
+          push_events: true
+          issues_events: true
+          job_events: true
+        status_code: 200
+
+    - name: Create Mattermost incoming webhook for GitLab
+      uri:
+        url: "{{ mattermost_url }}/api/v4/hooks/incoming"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ mattermost_token }}"
+        body_format: json
+        body:
+          channel_id: "{{ channel_id | default(mattermost_channel) }}"
+          display_name: "GitLab Integration"
+          description: "Webhook for GitLab notifications"
+        status_code: 201
+      register: webhook_creation
+
+    - name: Update GitLab service with webhook ID
+      uri:
+        url: "{{ gitlab_external_url }}/api/v4/projects/{{ gitlab_project_id | default('1') }}/services/mattermost"
+        method: PUT
+        headers:
+          PRIVATE-TOKEN: "{{ gitlab_api_token }}"
+        body_format: json
+        body:
+          webhook: "{{ mattermost_url }}/hooks/{{ webhook_creation.json.id }}"
+        status_code: 200
+      when: webhook_creation.status == 201
+
+    - name: Test GitLab-Mattermost integration
+      uri:
+        url: "{{ gitlab_external_url }}/api/v4/projects/{{ gitlab_project_id | default('1') }}/services/mattermost"
+        method: GET
+        headers:
+          PRIVATE-TOKEN: "{{ gitlab_api_token }}"
+        return_content: yes
+      register: integration_status
+
+    - name: Display integration status
+      debug:
+        msg: "GitLab-Mattermost integration configured successfully"
+      when: integration_status.status == 200

@@ -1,0 +1,117 @@
+---
+- name: Deploy GitLab from scratch
+  hosts: "{{ target_host | default('all') }}"
+  become: yes
+  vars:
+    gitlab_version: "16.9.0-ce.0"
+    gitlab_external_url: "https://{{ ansible_hostname }}"
+    gitlab_root_password: "{{ gitlab_root_password | default('CHANGE_THIS_PASSWORD') }}"
+
+  tasks:
+    - name: Update package cache
+      package:
+        update_cache: yes
+      when: ansible_os_family == "Debian"
+
+    - name: Install required dependencies
+      package:
+        name:
+          - curl
+          - openssh-server
+          - ca-certificates
+          - tzdata
+          - perl
+          - postfix
+        state: present
+
+    - name: Add GitLab GPG key
+      apt_key:
+        url: https://packages.gitlab.com/gitlab/gitlab-ce/gpgkey
+        state: present
+      when: ansible_os_family == "Debian"
+
+    - name: Add GitLab repository
+      apt_repository:
+        repo: "deb https://packages.gitlab.com/gitlab/gitlab-ce/ubuntu/ {{ ansible_distribution_release }} main"
+        state: present
+        filename: gitlab_gitlab-ce
+      when: ansible_os_family == "Debian"
+
+    - name: Install GitLab CE
+      package:
+        name: "gitlab-ce={{ gitlab_version }}"
+        state: present
+      when: ansible_os_family == "Debian"
+
+    - name: Configure GitLab external URL
+      lineinfile:
+        path: /etc/gitlab/gitlab.rb
+        regexp: "^# external_url"
+        line: "external_url '{{ gitlab_external_url }}'"
+        state: present
+
+    - name: Configure GitLab root password
+      lineinfile:
+        path: /etc/gitlab/gitlab.rb
+        regexp: "^# gitlab_rails\\['initial_root_password'\\]"
+        line: "gitlab_rails['initial_root_password'] = '{{ gitlab_root_password }}'"
+        state: present
+
+    - name: Configure GitLab HTTPS
+      block:
+        - name: Enable HTTPS in GitLab config
+          lineinfile:
+            path: /etc/gitlab/gitlab.rb
+            regexp: "^# nginx\\['listen_port'\\]"
+            line: "nginx['listen_port'] = 443"
+            state: present
+
+        - name: Configure SSL certificate
+          lineinfile:
+            path: /etc/gitlab/gitlab.rb
+            regexp: "^# nginx\\['ssl_certificate'\\]"
+            line: "nginx['ssl_certificate'] = '/etc/gitlab/ssl/{{ ansible_hostname }}.pem'"
+            state: present
+
+        - name: Configure SSL key
+          lineinfile:
+            path: /etc/gitlab/gitlab.rb
+            regexp: "^# nginx\\['ssl_certificate_key'\\]"
+            line: "nginx['ssl_certificate_key'] = '/etc/gitlab/ssl/{{ ansible_hostname }}.key'"
+            state: present
+
+        - name: Create SSL directory
+          file:
+            path: /etc/gitlab/ssl
+            state: directory
+            mode: '0755'
+
+        - name: Generate self-signed SSL certificate
+          openssl_certificate:
+            path: "/etc/gitlab/ssl/{{ ansible_hostname }}.pem"
+            privatekey_path: "/etc/gitlab/ssl/{{ ansible_hostname }}.key"
+            provider: selfsigned
+            force: no
+
+    - name: Reconfigure GitLab
+      command: gitlab-ctl reconfigure
+
+    - name: Start GitLab services
+      command: gitlab-ctl start
+
+    - name: Wait for GitLab to be ready
+      uri:
+        url: "{{ gitlab_external_url }}/users/sign_in"
+        validate_certs: no
+      register: gitlab_status
+      until: gitlab_status.status == 200
+      retries: 30
+      delay: 10
+
+    - name: Display GitLab access information
+      debug:
+        msg:
+          - "GitLab deployed successfully!"
+          - "URL: {{ gitlab_external_url }}"
+          - "Root password: {{ gitlab_root_password }}"
+          - "Please change the root password after first login"

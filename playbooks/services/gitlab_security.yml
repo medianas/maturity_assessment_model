@@ -1,0 +1,82 @@
+---
+- name: Secure GitLab configuration
+  hosts: "{{ target_host | default('all') }}"
+  become: yes
+  vars:
+    gitlab_config_path: "/etc/gitlab/gitlab.rb"
+
+  tasks:
+    - name: Backup GitLab config
+      copy:
+        src: "{{ gitlab_config_path }}"
+        dest: "{{ gitlab_config_path }}.backup"
+        remote_src: yes
+
+    - name: Configure HTTPS only
+      lineinfile:
+        path: "{{ gitlab_config_path }}"
+        regexp: "^external_url"
+        line: "external_url 'https://{{ ansible_hostname }}'"
+        state: present
+
+    - name: Disable HTTP
+      lineinfile:
+        path: "{{ gitlab_config_path }}"
+        regexp: "^# nginx\\['listen_port'\\]"
+        line: "nginx['listen_port'] = 443"
+        state: present
+
+    - name: Configure SSL certificate
+      lineinfile:
+        path: "{{ gitlab_config_path }}"
+        regexp: "^# nginx\\['ssl_certificate'\\]"
+        line: "nginx['ssl_certificate'] = '/etc/gitlab/ssl/{{ ansible_hostname }}.pem'"
+        state: present
+
+    - name: Configure SSL key
+      lineinfile:
+        path: "{{ gitlab_config_path }}"
+        regexp: "^# nginx\\['ssl_certificate_key'\\]"
+        line: "nginx['ssl_certificate_key'] = '/etc/gitlab/ssl/{{ ansible_hostname }}.key'"
+        state: present
+
+    - name: Enable HSTS
+      lineinfile:
+        path: "{{ gitlab_config_path }}"
+        regexp: "^# nginx\\['hsts_max_age'\\]"
+        line: "nginx['hsts_max_age'] = 31536000"
+        state: present
+
+    - name: Configure strong ciphers
+      lineinfile:
+        path: "{{ gitlab_config_path }}"
+        regexp: "^# nginx\\['ssl_ciphers'\\]"
+        line: "nginx['ssl_ciphers'] = 'ECDHE-RSA-AES256-GCM-SHA384:ECDHE-RSA-AES128-GCM-SHA256'"
+        state: present
+
+    - name: Configure SSL protocols
+      lineinfile:
+        path: "{{ gitlab_config_path }}"
+        regexp: "^# nginx\\['ssl_protocols'\\]"
+        line: "nginx['ssl_protocols'] = 'TLSv1.2 TLSv1.3'"
+        state: present
+
+    - name: Disable signup
+      lineinfile:
+        path: "{{ gitlab_config_path }}"
+        regexp: "^# gitlab_rails\\['gitlab_signup_enabled'\\]"
+        line: "gitlab_rails['gitlab_signup_enabled'] = false"
+        state: present
+
+    - name: Enable two-factor authentication
+      lineinfile:
+        path: "{{ gitlab_config_path }}"
+        regexp: "^# gitlab_rails\\['two_factor_authentication_enabled'\\]"
+        line: "gitlab_rails['two_factor_authentication_enabled'] = true"
+        state: present
+
+    - name: Reconfigure GitLab
+      command: gitlab-ctl reconfigure
+
+    - name: Restart GitLab
+      command: gitlab-ctl restart

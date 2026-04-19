@@ -1,0 +1,67 @@
+---
+- name: Upgrade encryption algorithms
+  hosts: "{{ target_host | default('all') }}"
+  become: yes
+
+  tasks:
+    - name: Update OpenSSL
+      package:
+        name: openssl
+        state: latest
+
+    - name: Check current TLS version in Apache
+      command: grep -i "SSLProtocol" /etc/apache2/mods-enabled/ssl.conf
+      register: apache_ssl
+      ignore_errors: yes
+      when: ansible_os_family == "Debian"
+
+    - name: Upgrade Apache SSL/TLS configuration
+      lineinfile:
+        path: /etc/apache2/mods-enabled/ssl.conf
+        regexp: "^SSLProtocol"
+        line: "SSLProtocol TLSv1.2 TLSv1.3"
+        state: present
+      when: ansible_os_family == "Debian"
+
+    - name: Upgrade Apache cipher suite
+      lineinfile:
+        path: /etc/apache2/mods-enabled/ssl.conf
+        regexp: "^SSLCipherSuite"
+        line: "SSLCipherSuite ECDHE-RSA-AES256-GCM-SHA384:ECDHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384:DHE-RSA-AES128-GCM-SHA256"
+        state: present
+      when: ansible_os_family == "Debian"
+
+    - name: Check current TLS version in Nginx
+      command: grep -i "ssl_protocols" /etc/nginx/nginx.conf
+      register: nginx_ssl
+      ignore_errors: yes
+
+    - name: Upgrade Nginx SSL/TLS configuration
+      lineinfile:
+        path: /etc/nginx/nginx.conf
+        regexp: "ssl_protocols"
+        line: "ssl_protocols TLSv1.2 TLSv1.3;"
+        state: present
+
+    - name: Upgrade Nginx cipher suite
+      lineinfile:
+        path: /etc/nginx/nginx.conf
+        regexp: "ssl_ciphers"
+        line: "ssl_ciphers ECDHE-RSA-AES256-GCM-SHA384:ECDHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384:DHE-RSA-AES128-GCM-SHA256;"
+        state: present
+
+    - name: Restart Apache
+      service:
+        name: apache2
+        state: restarted
+      when: ansible_os_family == "Debian"
+
+    - name: Restart Nginx
+      service:
+        name: nginx
+        state: restarted
+
+    - name: Update system packages for security
+      package:
+        name: "*"
+        state: latest

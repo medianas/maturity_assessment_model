@@ -1,0 +1,85 @@
+---
+- name: Configure firewall
+  hosts: "{{ target_host | default('all') }}"
+  become: yes
+  vars:
+    firewall_type: "{{ firewall_type | default('ufw') }}"
+
+  tasks:
+    - name: Install UFW (Ubuntu/Debian)
+      package:
+        name: ufw
+        state: present
+      when: ansible_os_family == "Debian" and firewall_type == "ufw"
+
+    - name: Install firewalld (RedHat)
+      package:
+        name: firewalld
+        state: present
+      when: ansible_os_family == "RedHat" and firewall_type == "firewalld"
+
+    - name: Enable and start UFW
+      service:
+        name: ufw
+        enabled: yes
+        state: started
+      when: firewall_type == "ufw"
+
+    - name: Enable and start firewalld
+      service:
+        name: firewalld
+        enabled: yes
+        state: started
+      when: firewall_type == "firewalld"
+
+    - name: Allow SSH (UFW)
+      ufw:
+        rule: allow
+        port: "22"
+        proto: tcp
+      when: firewall_type == "ufw"
+
+    - name: Allow HTTP (UFW)
+      ufw:
+        rule: allow
+        port: "80"
+        proto: tcp
+      when: firewall_type == "ufw"
+
+    - name: Allow HTTPS (UFW)
+      ufw:
+        rule: allow
+        port: "443"
+        proto: tcp
+      when: firewall_type == "ufw"
+
+    - name: Allow SSH (firewalld)
+      firewalld:
+        service: ssh
+        permanent: yes
+        state: enabled
+      when: firewall_type == "firewalld"
+
+    - name: Allow HTTP (firewalld)
+      firewalld:
+        service: http
+        permanent: yes
+        state: enabled
+      when: firewall_type == "firewalld"
+
+    - name: Allow HTTPS (firewalld)
+      firewalld:
+        service: https
+        permanent: yes
+        state: enabled
+      when: firewall_type == "firewalld"
+
+    - name: Set default policy to deny (UFW)
+      ufw:
+        state: enabled
+        policy: deny
+      when: firewall_type == "ufw"
+
+    - name: Reload firewalld
+      command: firewall-cmd --reload
+      when: firewall_type == "firewalld"
