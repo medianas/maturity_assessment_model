@@ -33,6 +33,7 @@ class MaturityAssessmentApplication:
         self._check_to_correction = {
             "https_enabled": "https_not_enabled",
             "ssh_config": "insecure_ssh_config",
+            "firewall_status": "firewall_misconfigured",
             "gitlab_integration": "gitlab_not_secure",
             "redmine_integration": "redmine_not_secure",
             "mattermost_integration": "mattermost_not_secure"
