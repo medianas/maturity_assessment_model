@@ -1,28 +1,45 @@
 # -*- mode: ruby -*-
 # vi: set ft=ruby :
 #
-# Кластер из 3 узлов с разным начальным уровнем зрелости DevSecOps.
-# Запуск: vagrant up  (из папки vagrant/)
-# SSH:    vagrant ssh node-critical
+# Кластер из 3 target-узлов + 1 Ansible control-node.
+# Порядок поднятия: target-узлы → control-node (последней,
+# чтобы успеть распространить SSH-ключи).
+#
+# Запуск: cd vagrant/cluster-base && vagrant up
+# SSH:    vagrant ssh node-control
 
 NODES = [
   {
-    name:   "node-critical",
-    ip:     "192.168.56.10",
-    script: "provision/node1_critical.sh",
-    desc:   "Уровень CRITICAL — нет сервисов, слабый SSH, нет firewall"
+    name:    "node-critical",
+    ip:      "192.168.56.10",
+    script:  "provision/node1_critical.sh",
+    memory:  512,
+    desc:    "Target — CRITICAL: нет сервисов, слабый SSH, нет firewall",
+    control: false
   },
   {
-    name:   "node-app",
-    ip:     "192.168.56.20",
-    script: "provision/node2_app.sh",
-    desc:   "Уровень LOW — HTTP только, слабый SSH, firewall неактивен"
+    name:    "node-app",
+    ip:      "192.168.56.20",
+    script:  "provision/node2_app.sh",
+    memory:  512,
+    desc:    "Target — LOW: HTTP только, слабый SSH, firewall неактивен",
+    control: false
   },
   {
-    name:   "node-secure",
-    ip:     "192.168.56.30",
-    script: "provision/node3_secure.sh",
-    desc:   "Уровень MEDIUM — HTTPS есть, SSH частично настроен, firewall активен"
+    name:    "node-secure",
+    ip:      "192.168.56.30",
+    script:  "provision/node3_secure.sh",
+    memory:  512,
+    desc:    "Target — MEDIUM: HTTPS, SSH частично настроен, firewall активен",
+    control: false
+  },
+  {
+    name:    "node-control",
+    ip:      "192.168.56.5",
+    script:  "provision/node_control.sh",
+    memory:  768,
+    desc:    "Ansible control-node — выполняет плейбуки на target-узлах",
+    control: true
   }
 ].freeze
 
@@ -30,7 +47,7 @@ Vagrant.configure("2") do |config|
   config.vm.box = "ubuntu/jammy64"
   config.vm.box_check_update = false
 
-  # Отключаем синхронизацию папок (не нужна для демо)
+  # По умолчанию synced_folder отключён
   config.vm.synced_folder ".", "/vagrant", disabled: true
 
   NODES.each do |node|
@@ -40,11 +57,17 @@ Vagrant.configure("2") do |config|
 
       vm_config.vm.provider "virtualbox" do |vb|
         vb.name   = node[:name]
-        vb.memory = 512
+        vb.memory = node[:memory]
         vb.cpus   = 1
         vb.gui    = false
-        # Ускорение запуска
         vb.customize ["modifyvm", :id, "--natdnshostresolver1", "on"]
+      end
+
+      # Только control-node получает копию плейбуков из корня проекта
+      if node[:control]
+        vm_config.vm.provision "file",
+          source: "../../playbooks",
+          destination: "/tmp/playbooks"
       end
 
       vm_config.vm.provision "shell", path: node[:script]

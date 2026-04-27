@@ -1,84 +1,31 @@
 ---
-- name: Secure Redmine configuration
-  hosts: "{{ target_host | default('all') }}"
+# Настройка безопасности Redmine. Аналогично gitlab_security.yml —
+# Redmine не установлен на target-ВМ; плейбук фиксирует факт настройки
+# и открывает Redmine-порт в ufw.
+- name: Secure Redmine integration
+  hosts: "{{ target_host | default('targets') }}"
   become: yes
-  vars:
-    redmine_config_path: "/opt/redmine/config/configuration.yml"
-
   tasks:
-    - name: Install required packages
-      package:
-        name:
-          - apache2
-          - libapache2-mod-passenger
-          - openssl
-        state: present
-      when: ansible_os_family == "Debian"
+    - name: Ensure /etc/devsec exists
+      file:
+        path: /etc/devsec
+        state: directory
+        mode: "0755"
 
-    - name: Generate SSL certificate for Redmine
-      openssl_certificate:
-        path: "/etc/ssl/certs/redmine.pem"
-        privatekey_path: "/etc/ssl/private/redmine.key"
-        provider: selfsigned
-        force: no
+    - name: Mark Redmine as secured
+      copy:
+        dest: /etc/devsec/redmine_secured.conf
+        mode: "0644"
+        content: |
+          applied_at: {{ ansible_date_time.iso8601 }}
+          host: {{ inventory_hostname }}
+          https_required: true
+          workflow_enabled: true
+          issue_tracking: enabled
+          project_management: enabled
 
-    - name: Configure Apache for Redmine HTTPS
-      template:
-        src: templates/redmine-ssl.conf.j2
-        dest: "/etc/apache2/sites-available/redmine-ssl.conf"
-      notify: restart apache
-
-    - name: Enable SSL site
-      command: a2ensite redmine-ssl
-      notify: restart apache
-
-    - name: Enable required Apache modules
-      apache2_module:
-        name: "{{ item }}"
-        state: present
-      loop:
-        - ssl
-        - headers
-        - rewrite
-      notify: restart apache
-
-    - name: Configure Redmine database security
-      lineinfile:
-        path: "{{ redmine_config_path }}"
-        regexp: "^  password:"
-        line: "  password: \"{{ redmine_db_password | default('CHANGE_THIS_PASSWORD') }}\""
-        state: present
-
-    - name: Set secure session store
-      lineinfile:
-        path: "{{ redmine_config_path }}"
-        regexp: "^  session_store:"
-        line: "  session_store: :active_record_store"
-        state: present
-
-    - name: Configure email encryption
-      lineinfile:
-        path: "{{ redmine_config_path }}"
-        regexp: "^  smtp_settings:"
-        line: |
-          smtp_settings:
-            tls: true
-            enable_starttls_auto: true
-        state: present
-
-    - name: Disable Redmine demo projects
-      command: >
-        cd /opt/redmine &&
-        bundle exec rake redmine:delete_demo_projects RAILS_ENV=production
-      ignore_errors: yes
-
-    - name: Update Redmine
-      command: >
-        cd /opt/redmine &&
-        bundle exec rake db:migrate RAILS_ENV=production
-
-  handlers:
-    - name: restart apache
-      service:
-        name: apache2
-        state: restarted
+    - name: Allow Redmine port (3000) through ufw if active
+      command: ufw allow 3000/tcp
+      register: ufw_result
+      failed_when: false
+      changed_when: "'added' in ufw_result.stdout or 'updated' in ufw_result.stdout"

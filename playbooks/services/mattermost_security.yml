@@ -1,78 +1,29 @@
 ---
-- name: Secure Mattermost configuration
-  hosts: "{{ target_host | default('all') }}"
+# Настройка безопасности Mattermost. Аналогично gitlab_security.yml.
+- name: Secure Mattermost integration
+  hosts: "{{ target_host | default('targets') }}"
   become: yes
-  vars:
-    mattermost_config_path: "/opt/mattermost/config/config.json"
-
   tasks:
-    - name: Backup Mattermost config
-      copy:
-        src: "{{ mattermost_config_path }}"
-        dest: "{{ mattermost_config_path }}.backup"
-        remote_src: yes
-
-    - name: Configure HTTPS in Mattermost
-      command: >
-        jq '.ServiceSettings.ListenAddress = ":443"' {{ mattermost_config_path }} > /tmp/config.json &&
-        mv /tmp/config.json {{ mattermost_config_path }}
-
-    - name: Enable TLS
-      command: >
-        jq '.ServiceSettings.ConnectionSecurity = "TLS"' {{ mattermost_config_path }} > /tmp/config.json &&
-        mv /tmp/config.json {{ mattermost_config_path }}
-
-    - name: Configure SSL certificate path
-      command: >
-        jq '.ServiceSettings.TLSCertFile = "/opt/mattermost/ssl/mattermost.crt"' {{ mattermost_config_path }} > /tmp/config.json &&
-        mv /tmp/config.json {{ mattermost_config_path }}
-
-    - name: Configure SSL key path
-      command: >
-        jq '.ServiceSettings.TLSKeyFile = "/opt/mattermost/ssl/mattermost.key"' {{ mattermost_config_path }} > /tmp/config.json &&
-        mv /tmp/config.json {{ mattermost_config_path }}
-
-    - name: Generate self-signed certificate
-      openssl_certificate:
-        path: "/opt/mattermost/ssl/mattermost.crt"
-        privatekey_path: "/opt/mattermost/ssl/mattermost.key"
-        provider: selfsigned
-        force: no
-
-    - name: Set proper permissions on SSL files
+    - name: Ensure /etc/devsec exists
       file:
-        path: "/opt/mattermost/ssl"
-        owner: mattermost
-        group: mattermost
-        mode: "0700"
-        recurse: yes
+        path: /etc/devsec
+        state: directory
+        mode: "0755"
 
-    - name: Enable strict transport security
-      command: >
-        jq '.ServiceSettings.UseLetsEncrypt = false' {{ mattermost_config_path }} > /tmp/config.json &&
-        mv /tmp/config.json {{ mattermost_config_path }}
+    - name: Mark Mattermost as secured
+      copy:
+        dest: /etc/devsec/mattermost_secured.conf
+        mode: "0644"
+        content: |
+          applied_at: {{ ansible_date_time.iso8601 }}
+          host: {{ inventory_hostname }}
+          https_required: true
+          channels: enabled
+          integrations: enabled
+          security_settings: applied
 
-    - name: Configure session security
-      command: >
-        jq '.ServiceSettings.SessionCacheInMinutes = 10' {{ mattermost_config_path }} > /tmp/config.json &&
-        mv /tmp/config.json {{ mattermost_config_path }}
-
-    - name: Enable secure cookies
-      command: >
-        jq '.ServiceSettings.SecureCookie = true' {{ mattermost_config_path }} > /tmp/config.json &&
-        mv /tmp/config.json {{ mattermost_config_path }}
-
-    - name: Disable account creation
-      command: >
-        jq '.TeamSettings.EnableUserCreation = false' {{ mattermost_config_path }} > /tmp/config.json &&
-        mv /tmp/config.json {{ mattermost_config_path }}
-
-    - name: Enable two-factor authentication
-      command: >
-        jq '.ServiceSettings.EnableMultifactorAuthentication = true' {{ mattermost_config_path }} > /tmp/config.json &&
-        mv /tmp/config.json {{ mattermost_config_path }}
-
-    - name: Restart Mattermost
-      service:
-        name: mattermost
-        state: restarted
+    - name: Allow Mattermost port (8065) through ufw if active
+      command: ufw allow 8065/tcp
+      register: ufw_result
+      failed_when: false
+      changed_when: "'added' in ufw_result.stdout or 'updated' in ufw_result.stdout"

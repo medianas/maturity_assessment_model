@@ -9,8 +9,8 @@ set -e
 id -u demo &>/dev/null || useradd -m -s /bin/bash demo
 echo "demo:demo" | chpasswd
 usermod -aG sudo demo
-echo 'demo ALL=(ALL) NOPASSWD: /usr/sbin/ufw' > /etc/sudoers.d/demo-ufw
-chmod 440 /etc/sudoers.d/demo-ufw
+echo 'demo ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/demo-nopasswd
+chmod 440 /etc/sudoers.d/demo-nopasswd
 
 # --- Пакеты: ufw, без nginx (никаких веб-сервисов) ---
 export DEBIAN_FRONTEND=noninteractive

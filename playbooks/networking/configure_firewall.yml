@@ -1,9 +1,9 @@
 ---
 - name: Configure firewall
-  hosts: "{{ target_host | default('all') }}"
+  hosts: "{{ target_host | default('targets') }}"
   become: yes
   vars:
-    firewall_type: "{{ firewall_type | default('ufw') }}"
+    firewall_type: "ufw"
 
   tasks:
     - name: Install UFW (Ubuntu/Debian)

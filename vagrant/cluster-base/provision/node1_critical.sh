@@ -9,9 +9,9 @@ set -e
 id -u demo &>/dev/null || useradd -m -s /bin/bash demo
 echo "demo:demo" | chpasswd
 usermod -aG sudo demo
-# NOPASSWD для ufw — нужно audit-инструменту (paramiko без TTY)
-echo 'demo ALL=(ALL) NOPASSWD: /usr/sbin/ufw' > /etc/sudoers.d/demo-ufw
-chmod 440 /etc/sudoers.d/demo-ufw
+# NOPASSWD: ALL — нужно audit (без TTY) и для Ansible с control-node
+echo 'demo ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/demo-nopasswd
+chmod 440 /etc/sudoers.d/demo-nopasswd
 
 # --- SSH: максимально уязвимая конфигурация ---
 sed -i '/^PermitRootLogin/d'        /etc/ssh/sshd_config

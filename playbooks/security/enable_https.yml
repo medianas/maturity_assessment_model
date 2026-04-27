@@ -1,76 +1,66 @@
 ---
+# Включение HTTPS на nginx-сервере с self-signed сертификатом.
+# Идемпотентен: повторный запуск не пересоздаёт сертификат и не ломает конфиг.
 - name: Enable HTTPS on web server
-  hosts: "{{ target_host | default('all') }}"
+  hosts: "{{ target_host | default('targets') }}"
   become: yes
   vars:
-    ssl_cert_path: "/etc/ssl/certs/{{ ansible_hostname }}.pem"
-    ssl_key_path: "/etc/ssl/private/{{ ansible_hostname }}.key"
-    web_server: "{{ web_server_type | default('apache2') }}"
+    ssl_dir: /etc/nginx/ssl
+    ssl_key: "{{ ssl_dir }}/server.key"
+    ssl_crt: "{{ ssl_dir }}/server.crt"
 
   tasks:
-    - name: Install required packages
-      package:
+    - name: Install nginx and openssl
+      apt:
         name:
-          - "{{ web_server }}"
+          - nginx
           - openssl
-          - certbot
         state: present
-      when: ansible_os_family == "Debian"
+        update_cache: yes
+        cache_valid_time: 3600
 
-    - name: Install required packages (RedHat)
-      package:
-        name:
-          - "{{ web_server }}"
-          - openssl
-          - certbot
-        state: present
-      when: ansible_os_family == "RedHat"
-
-    - name: Generate self-signed SSL certificate
-      openssl_certificate:
-        path: "{{ ssl_cert_path }}"
-        privatekey_path: "{{ ssl_key_path }}"
-        provider: selfsigned
-        force: no
-      notify: restart web server
-
-    - name: Configure Apache for HTTPS
-      template:
-        src: templates/apache-ssl.conf.j2
-        dest: "/etc/{{ web_server }}/sites-available/{{ ansible_hostname }}-ssl.conf"
-      when: web_server == "apache2"
-      notify: restart web server
-
-    - name: Enable SSL site
-      command: a2ensite {{ ansible_hostname }}-ssl
-      when: web_server == "apache2"
-      notify: restart web server
-
-    - name: Configure Nginx for HTTPS
-      template:
-        src: templates/nginx-ssl.conf.j2
-        dest: "/etc/nginx/sites-available/{{ ansible_hostname }}-ssl"
-      when: web_server == "nginx"
-      notify: restart web server
-
-    - name: Enable Nginx site
+    - name: Ensure SSL directory exists
       file:
-        src: "/etc/nginx/sites-available/{{ ansible_hostname }}-ssl"
-        dest: "/etc/nginx/sites-enabled/{{ ansible_hostname }}-ssl"
-        state: link
-      when: web_server == "nginx"
-      notify: restart web server
+        path: "{{ ssl_dir }}"
+        state: directory
+        mode: "0755"
 
-    - name: Disable HTTP redirect to HTTPS
-      lineinfile:
-        path: "/etc/{{ web_server }}/sites-available/{{ ansible_hostname }}"
-        regexp: "^.*redirect.*$"
-        line: "Redirect permanent / https://{{ ansible_hostname }}/"
-        state: present
-      when: web_server == "apache2"
+    - name: Generate self-signed certificate (only if missing)
+      command: >
+        openssl req -x509 -nodes -days 365 -newkey rsa:2048
+        -keyout {{ ssl_key }} -out {{ ssl_crt }}
+        -subj "/C=RU/ST=Moscow/L=Moscow/O=Demo/CN={{ inventory_hostname }}"
+      args:
+        creates: "{{ ssl_crt }}"
+
+    - name: Configure nginx with HTTP→HTTPS redirect
+      copy:
+        dest: /etc/nginx/sites-available/default
+        mode: "0644"
+        content: |
+          server {
+              listen 80 default_server;
+              return 301 https://$host$request_uri;
+          }
+          server {
+              listen 443 ssl default_server;
+              ssl_certificate     {{ ssl_crt }};
+              ssl_certificate_key {{ ssl_key }};
+              root /var/www/html;
+              index index.html;
+              server_name _;
+              location / { try_files $uri $uri/ =404; }
+          }
+      notify: restart nginx
+
+    - name: Enable nginx
+      service:
+        name: nginx
+        enabled: yes
+        state: started
 
   handlers:
-    - name: restart web server
+    - name: restart nginx
       service:
-        name: "{{ web_server }}"
+        name: nginx
         state: restarted
