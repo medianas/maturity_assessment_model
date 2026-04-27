@@ -142,18 +142,24 @@ class InfrastructureAudit:
                 key_filename=node.ssh_credentials.private_key_path,
                 timeout=10
             )
+            # Проверяем реальный статус правил, а не только systemd-юнит.
+            # ufw как oneshot может быть "active" в systemd, но правила выключены.
             _, stdout, _ = ssh.exec_command(
-                "systemctl is-active ufw || systemctl is-active firewalld || echo 'no_firewall'"
+                "if command -v ufw >/dev/null 2>&1; then "
+                "  sudo ufw status | head -1 | awk '{print tolower($2)}'; "
+                "elif command -v firewall-cmd >/dev/null 2>&1; then "
+                "  firewall-cmd --state 2>/dev/null || echo inactive; "
+                "else echo no_firewall; fi"
             )
-            firewall_status = stdout.read().decode().strip()
+            firewall_status = stdout.read().decode().strip().lower()
             ssh.close()
 
             if firewall_status in ['active', 'running']:
-                compliant, actual_value, details = True, "active", "Firewall активен"
+                compliant, actual_value, details = True, "active", "Firewall активен и правила загружены"
             elif firewall_status == 'no_firewall':
                 compliant, actual_value, details = False, "not_installed", "Firewall не установлен"
             else:
-                compliant, actual_value, details = False, "inactive", "Firewall установлен но не активен"
+                compliant, actual_value, details = False, "inactive", "Firewall установлен но правила выключены"
 
             return AuditCheckResult(
                 check_name="firewall_status",

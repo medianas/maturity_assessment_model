@@ -1,0 +1,51 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+#
+# Сценарий "Production Lifecycle": dev → staging → prod
+# Сеть: 192.168.57.0/24 (отлична от cluster-base)
+# Запуск: cd vagrant/cluster-lifecycle && vagrant up
+
+NODES = [
+  {
+    name:   "node-dev",
+    ip:     "192.168.57.10",
+    script: "provision/node-dev.sh",
+    desc:   "DEV — HTTP only, weak SSH, no firewall (нарушений много)"
+  },
+  {
+    name:   "node-staging",
+    ip:     "192.168.57.20",
+    script: "provision/node-staging.sh",
+    desc:   "STAGING — HTTPS, ufw активен, SSH средне настроен"
+  },
+  {
+    name:   "node-prod",
+    ip:     "192.168.57.30",
+    script: "provision/node-prod.sh",
+    desc:   "PROD — HTTPS, hardened SSH, ufw с правилами"
+  }
+].freeze
+
+Vagrant.configure("2") do |config|
+  config.vm.box = "ubuntu/jammy64"
+  config.vm.box_check_update = false
+  config.vm.synced_folder ".", "/vagrant", disabled: true
+
+  NODES.each do |node|
+    config.vm.define node[:name] do |vm_config|
+      vm_config.vm.hostname = node[:name]
+      vm_config.vm.network "private_network", ip: node[:ip]
+
+      vm_config.vm.provider "virtualbox" do |vb|
+        vb.name   = node[:name]
+        vb.memory = 512
+        vb.cpus   = 1
+        vb.gui    = false
+        vb.customize ["modifyvm", :id, "--natdnshostresolver1", "on"]
+      end
+
+      vm_config.vm.provision "shell", path: node[:script]
+      vm_config.vm.post_up_message = "#{node[:name]} (#{node[:ip]}) готов. #{node[:desc]}"
+    end
+  end
+end

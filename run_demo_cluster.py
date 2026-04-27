@@ -2,6 +2,7 @@ import sys
 if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
     sys.stdout.reconfigure(encoding="utf-8")
 
+import argparse
 from datetime import datetime
 from unittest.mock import patch
 
@@ -12,19 +13,43 @@ from models import (
     AutomationExecutionResult,
 )
 
-# --- Конфигурация кластера ---
-CLUSTER_NODES = [
-    {"ip": "192.168.56.10", "name": "node-critical", "profile": "admin"},
-    {"ip": "192.168.56.20", "name": "node-app",      "profile": "admin"},
-    {"ip": "192.168.56.30", "name": "node-secure",   "profile": "admin"},
-]
+# --- Конфигурации кластеров ---
+CLUSTERS = {
+    "base": {
+        "title": "Infrastructure Maturity Baseline",
+        "description": "Базовый сценарий — три узла с возрастающей зрелостью",
+        "nodes": [
+            {"ip": "192.168.56.10", "name": "node-critical"},
+            {"ip": "192.168.56.20", "name": "node-app"},
+            {"ip": "192.168.56.30", "name": "node-secure"},
+        ],
+    },
+    "lifecycle": {
+        "title": "Production Lifecycle (dev → staging → prod)",
+        "description": "Жизненный цикл сервиса: окружения разработки до продакшена",
+        "nodes": [
+            {"ip": "192.168.57.10", "name": "node-dev"},
+            {"ip": "192.168.57.20", "name": "node-staging"},
+            {"ip": "192.168.57.30", "name": "node-prod"},
+        ],
+    },
+    "tiers": {
+        "title": "Service Tiers (bastion / internal / public)",
+        "description": "Разные роли узлов: jump host, внутренний, публичный",
+        "nodes": [
+            {"ip": "192.168.58.10", "name": "node-bastion"},
+            {"ip": "192.168.58.20", "name": "node-internal"},
+            {"ip": "192.168.58.30", "name": "node-public"},
+        ],
+    },
+}
 
 SSH_CREDS = SSHCredentials(username="demo", password="demo")
 SEP = "=" * 65
 
 
 def _mock_automation(action_plan, target_node) -> AutomationExecutionReport:
-    """Симуляция Ansible: реальный аудит + план, имитация применения плейбуков."""
+    """Симуляция Ansible: реальный аудит, но автоматизация — не модифицируем ВМ."""
     results = [
         AutomationExecutionResult(
             action_id=action.action_id,
@@ -65,12 +90,11 @@ def _print_node_audit(report, node_info: dict) -> None:
     print(f"  Уровень зрелости ПОСЛЕ: {lvl_a.name} ({lvl_a.value}/5)  [{delta_str}]")
 
 
-def _print_cluster_summary(reports, nodes_info: list) -> None:
+def _print_cluster_summary(reports, nodes_info: list, cluster_title: str) -> None:
     print(f"\n{SEP}")
-    print("  СВОДНАЯ ТАБЛИЦА ПО КЛАСТЕРУ")
+    print(f"  СВОДНАЯ ТАБЛИЦА — {cluster_title}")
     print(SEP)
-    hdr = f"  {'Узел':<16} {'Имя':<16} {'ДО':<12} {'ПОСЛЕ':<12} {'Δ':<4} {'Соответствий'}"
-    print(hdr)
+    print(f"  {'Узел':<16} {'Имя':<16} {'ДО':<12} {'ПОСЛЕ':<12} {'Δ':<4} {'Соответствий'}")
     print(f"  {'-'*16} {'-'*16} {'-'*12} {'-'*12} {'-'*4} {'-'*13}")
 
     total_before, total_after = 0, 0
@@ -99,39 +123,51 @@ def _print_cluster_summary(reports, nodes_info: list) -> None:
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description="Кластерная оценка зрелости DevSecOps")
+    parser.add_argument(
+        "cluster", nargs="?", default="base", choices=list(CLUSTERS.keys()),
+        help="Какой кластер оценивать (по умолчанию: base)"
+    )
+    parser.add_argument(
+        "--profile", default="admin", choices=["user", "default", "admin"],
+        help="Профиль аудита"
+    )
+    args = parser.parse_args()
+
+    cluster = CLUSTERS[args.cluster]
+    nodes_info = cluster["nodes"]
+
     print(SEP)
-    print("  Кластерная оценка зрелости DevSecOps-инфраструктуры")
-    print(f"  Узлов: {len(CLUSTER_NODES)} | Профиль: admin | SSH: demo@<ip>")
+    print(f"  Кластерная оценка зрелости — {cluster['title']}")
+    print(f"  {cluster['description']}")
+    print(f"  Узлов: {len(nodes_info)} | Профиль: {args.profile} | SSH: demo@<ip>")
     print(SEP)
     print()
-    for info in CLUSTER_NODES:
+    for info in nodes_info:
         print(f"  {info['ip']}  {info['name']}")
 
     app = MaturityAssessmentApplication()
 
-    # Реальный аудит (SSH + порты), автоматизация — симуляция
     with patch.object(app.automation_manager, "execute_action_plan",
                       side_effect=_mock_automation):
         reports = app.initiate_maturity_assessment(
-            ip_addresses=[n["ip"] for n in CLUSTER_NODES],
+            ip_addresses=[n["ip"] for n in nodes_info],
             ssh_credentials=SSH_CREDS,
-            profile="admin",
+            profile=args.profile,
         )
 
     if not reports:
-        print("\n[ERROR] Отчёты не получены. Убедитесь, что Vagrant-кластер запущен:")
-        print("  cd vagrant && vagrant up")
+        print(f"\n[ERROR] Отчёты не получены. Убедитесь, что кластер '{args.cluster}' запущен:")
+        print(f"  cd vagrant/cluster-{args.cluster} && vagrant up")
         sys.exit(1)
 
-    # Вывод по каждому узлу
-    for r, info in zip(reports, CLUSTER_NODES):
+    for r, info in zip(reports, nodes_info):
         print(f"\n{SEP}")
         print(f"  УЗЕЛ: {r.node_ip}  ({info['name']})")
         print(SEP)
         _print_node_audit(r, info)
 
-    # Итоговая сводка
-    _print_cluster_summary(reports, CLUSTER_NODES)
+    _print_cluster_summary(reports, nodes_info, cluster["title"])
 
     print(f"\n{SEP}")
     print("  Кластерная оценка завершена")

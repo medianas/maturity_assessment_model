@@ -89,38 +89,77 @@ class AnsibleAutomationManager:
         target_host: str,
         extra_vars: dict = None
     ) -> AutomationExecutionResult:
+        """запустить Ansible-плейбук на целевом хосте. Плейбуки обеспечивают
+        идемпотентное конфигурационное управление.
+        playbook_path: путь к плейбуку (например, playbooks/security/enable_https.yml)
+        target_host: IP адрес целевого хоста
+        extra_vars: дополнительные переменные для плейбука
+        Returns: результат выполнения"""
+        import subprocess
         import time
+        import os
         start_time = time.time()
-        
+
         try:
             print(f"        Запуск плейбука: {playbook_path}")
             print(f"        На хосте: {target_host}")
             if extra_vars:
                 print(f"        Переменные: {extra_vars}")
-            
-            time.sleep(0.5)
-            
-            result = AutomationExecutionResult(
-                action_id=playbook_path,
-                success=True,
-                execution_time=time.time() - start_time,
-                stdout=f"Плейбук {playbook_path} выполнен успешно на {target_host}",
-                stderr="",
-                idempotent=True
+
+            inventory_content = (
+                f"[target]\n"
+                f"{target_host} ansible_user=root "
+                f"ansible_ssh_common_args='-o StrictHostKeyChecking=no'\n"
             )
-            
-            return result
-        
+            inventory_file = f"/tmp/inventory_{target_host}.ini"
+            with open(inventory_file, 'w') as f:
+                f.write(inventory_content)
+
+            cmd = [
+                'ansible-playbook',
+                '-i', inventory_file,
+                playbook_path,
+                '--extra-vars', f'target_host={target_host}',
+            ]
+            if extra_vars:
+                for key, value in extra_vars.items():
+                    cmd.extend(['--extra-vars', f'{key}={value}'])
+
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+            execution_time = time.time() - start_time
+
+            try:
+                os.remove(inventory_file)
+            except Exception:
+                pass
+
+            return AutomationExecutionResult(
+                action_id=playbook_path,
+                success=result.returncode == 0,
+                execution_time=execution_time,
+                stdout=result.stdout,
+                stderr=result.stderr,
+                idempotent=result.returncode == 0,
+            )
+
+        except subprocess.TimeoutExpired:
+            return AutomationExecutionResult(
+                action_id=playbook_path,
+                success=False,
+                execution_time=time.time() - start_time,
+                stdout="",
+                stderr="Timeout: Playbook execution exceeded 5 minutes",
+                idempotent=False,
+            )
         except Exception as e:
-            result = AutomationExecutionResult(
+            return AutomationExecutionResult(
                 action_id=playbook_path,
                 success=False,
                 execution_time=time.time() - start_time,
                 stdout="",
                 stderr=str(e),
-                idempotent=False
+                idempotent=False,
             )
-            return result
     
     def _run_role(
         self,

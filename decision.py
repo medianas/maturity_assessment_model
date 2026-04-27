@@ -183,8 +183,8 @@ class DecisionEngine:
         
         from config import MATURITY_RECOMMENDATIONS
         
-        if maturity_level in MATURITY_RECOMMENDATIONS:
-            recommendations = MATURITY_RECOMMENDATIONS[maturity_level]
+        if maturity_level.value in MATURITY_RECOMMENDATIONS:
+            recommendations = list(MATURITY_RECOMMENDATIONS[maturity_level.value])
         
         for check in audit_report.checks:
             if not check.compliant:

@@ -1,0 +1,51 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+#
+# Сценарий "Service Tiers": bastion / internal / public
+# Сеть: 192.168.58.0/24
+# Запуск: cd vagrant/cluster-tiers && vagrant up
+
+NODES = [
+  {
+    name:   "node-bastion",
+    ip:     "192.168.58.10",
+    script: "provision/node-bastion.sh",
+    desc:   "BASTION — только SSH, минимальная атак-поверхность"
+  },
+  {
+    name:   "node-internal",
+    ip:     "192.168.58.20",
+    script: "provision/node-internal.sh",
+    desc:   "INTERNAL — внутренний HTTP-сервис, ufw активен"
+  },
+  {
+    name:   "node-public",
+    ip:     "192.168.58.30",
+    script: "provision/node-public.sh",
+    desc:   "PUBLIC — публичный HTTPS-сайт, hardened, ufw с правилами"
+  }
+].freeze
+
+Vagrant.configure("2") do |config|
+  config.vm.box = "ubuntu/jammy64"
+  config.vm.box_check_update = false
+  config.vm.synced_folder ".", "/vagrant", disabled: true
+
+  NODES.each do |node|
+    config.vm.define node[:name] do |vm_config|
+      vm_config.vm.hostname = node[:name]
+      vm_config.vm.network "private_network", ip: node[:ip]
+
+      vm_config.vm.provider "virtualbox" do |vb|
+        vb.name   = node[:name]
+        vb.memory = 512
+        vb.cpus   = 1
+        vb.gui    = false
+        vb.customize ["modifyvm", :id, "--natdnshostresolver1", "on"]
+      end
+
+      vm_config.vm.provision "shell", path: node[:script]
+      vm_config.vm.post_up_message = "#{node[:name]} (#{node[:ip]}) готов. #{node[:desc]}"
+    end
+  end
+end
