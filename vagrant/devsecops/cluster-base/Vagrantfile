@@ -1,0 +1,81 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+#
+# cluster-base v2 — распределённая DevOps-инфраструктура.
+#
+# СЕМАНТИКА (наследие v1): «разная зрелость» — узлы установлены и работают,
+# но интеграции и безопасность не настроены. Это базовый кейс legacy-стенда,
+# на котором audit-инструмент должен показать максимальную пользу.
+# Поэтому default scenario = broken.
+#
+# 4 ВМ:
+#   - node-control     192.168.56.5    Ansible-control
+#   - node-gitlab      192.168.56.10   GitLab CE (через Docker)
+#   - node-redmine     192.168.56.20   Redmine + PostgreSQL (через Docker)
+#   - node-mattermost  192.168.56.30   Mattermost + PostgreSQL (через Docker)
+#
+# Сценарии (через ENV-переменную VAGRANT_SCENARIO):
+#   missing — сервисы НЕ установлены (только OS+SSH); audit обнаружит отсутствие
+#   broken  — установлены, но интеграции разрушены (webhooks/HTTPS отсутствуют)
+#   ok      — всё установлено, настроено, интеграции работают
+#
+# Запуск:
+#   $env:VAGRANT_SCENARIO="broken"; vagrant up    # PowerShell
+#   VAGRANT_SCENARIO=broken vagrant up            # bash
+#
+# По умолчанию (если переменная не задана) — broken.
+
+SCENARIO = ENV['VAGRANT_SCENARIO'] || 'broken'
+unless %w[missing broken ok].include?(SCENARIO)
+  raise "VAGRANT_SCENARIO must be one of: missing, broken, ok (got: #{SCENARIO})"
+end
+
+# Memory зависит от сценария: для missing узлам нужно мало (только OS+SSH+ufw),
+# для broken/ok — реальные сервисы (GitLab требует 4 GB!).
+gitlab_mem  = SCENARIO == 'missing' ? 768  : 4096
+redmine_mem = SCENARIO == 'missing' ? 768  : 1536
+matter_mem  = SCENARIO == 'missing' ? 768  : 1024
+control_mem = 1024  # control-node всегда нужен 1 GB (ansible install)
+
+NODES = [
+  { name: "node-gitlab",     ip: "192.168.56.10", script: "provision/node_gitlab.sh",     memory: gitlab_mem,  cpus: 1, desc: "GitLab CE",                control: false },
+  { name: "node-redmine",    ip: "192.168.56.20", script: "provision/node_redmine.sh",    memory: redmine_mem, cpus: 1, desc: "Redmine + PostgreSQL",     control: false },
+  { name: "node-mattermost", ip: "192.168.56.30", script: "provision/node_mattermost.sh", memory: matter_mem,  cpus: 1, desc: "Mattermost + PostgreSQL",  control: false },
+  { name: "node-control",    ip: "192.168.56.5",  script: "provision/node_control.sh",    memory: control_mem, cpus: 1, desc: "Ansible control-node",     control: true  },
+].freeze
+
+Vagrant.configure("2") do |config|
+  config.vm.box = "ubuntu/jammy64"
+  config.vm.box_check_update = false
+  config.vm.boot_timeout = 600
+  config.vm.synced_folder ".", "/vagrant", disabled: true
+
+  NODES.each do |node|
+    config.vm.define node[:name] do |vm_config|
+      vm_config.vm.hostname = node[:name]
+      vm_config.vm.network "private_network", ip: node[:ip]
+
+      vm_config.vm.provider "virtualbox" do |vb|
+        vb.name   = node[:name]
+        vb.memory = node[:memory]
+        vb.cpus   = node[:cpus]
+        vb.gui    = false
+        vb.customize ["modifyvm", :id, "--natdnshostresolver1", "on"]
+      end
+
+      # Только control-node получает копию плейбуков
+      if node[:control]
+        vm_config.vm.provision "file",
+          source: "../../../playbooks",
+          destination: "/tmp/playbooks"
+      end
+
+      vm_config.vm.provision "shell",
+        path: node[:script],
+        env: { "SCENARIO" => SCENARIO }
+
+      vm_config.vm.post_up_message =
+        "#{node[:name]} (#{node[:ip]}) — #{node[:desc]} [scenario=#{SCENARIO}]"
+    end
+  end
+end

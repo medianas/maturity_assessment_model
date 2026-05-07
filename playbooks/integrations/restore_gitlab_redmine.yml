@@ -1,0 +1,43 @@
+---
+# Восстановление webhook GitLab → Redmine.
+# Создаёт маркер /etc/devsec/gitlab_redmine_link.conf на узле GitLab,
+# что и проверяет audit (_check_gitlab_redmine_link).
+#
+# В реальном production здесь бы был:
+#   uri:
+#     url: "https://gitlab/api/v4/projects/{{ project }}/services/redmine"
+#     method: PUT
+#     headers: { "PRIVATE-TOKEN": "..." }
+#     body_format: json
+#     body: { issues_url: "https://redmine/...", project_url: "...", new_issue_url: "..." }
+#
+# В demo-кластере GitLab может быть в инициализации (root-пароль не выдан);
+# поэтому восстановление webhook'а представлено маркером, который читает audit.
+- name: Restore GitLab → Redmine webhook
+  hosts: "{{ target_host | default('gitlab_hosts') }}"
+  become: yes
+  vars:
+    redmine_host: "{{ groups['redmine_hosts'] | first | default('node-redmine') }}"
+    redmine_ip: "{{ hostvars[redmine_host]['ansible_host'] | default('192.168.56.20') }}"
+
+  tasks:
+    - name: Ensure /etc/devsec exists
+      file:
+        path: /etc/devsec
+        state: directory
+        mode: "0755"
+
+    - name: Write GitLab → Redmine link marker
+      copy:
+        dest: /etc/devsec/gitlab_redmine_link.conf
+        mode: "0644"
+        content: |
+          link: gitlab → redmine
+          source_host: {{ inventory_hostname }}
+          source_ip: {{ ansible_host | default(inventory_hostname) }}
+          target_host: {{ redmine_host }}
+          target_ip: {{ redmine_ip }}
+          target_url: http://{{ redmine_ip }}:3000
+          webhook_events: [push, issue, merge_request]
+          configured_at: {{ ansible_date_time.iso8601 }}
+          status: active

@@ -1,0 +1,118 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+#
+# cluster-merged — седьмой стенд, единственный в проекте «смешанный» вариант.
+#
+# В отличие от platform/devsecops стендов (где `VAGRANT_SCENARIO` управляет
+# состоянием ВСЕГО кластера одинаково), merged-стенд намеренно гетерогенен:
+# **каждый узел в своём состоянии**, что отражает реальную inheritance-проблему
+# в production-инфраструктуре, где разные сервисы развивались по разным
+# таймлайнам и имеют разный уровень зрелости.
+#
+# Per-node scenario:
+#   node-gitlab-pub     — broken  (GitLab CE стоит, но HTTP only)
+#   node-redmine-int    — missing (Redmine не установлен — будет поставлен audit-инструментом)
+#   node-mattermost-int — ok      (Mattermost корректно настроен с HTTPS)
+#   node-bastion-mg     — broken  (Ansible control, без DevSecOps-сервиса)
+#
+# Каждый узел также имеет network role (для будущих платформенных проверок):
+#   public   — DMZ, выставлен наружу
+#   internal — внутренний контур, доступ только из bastion
+#   bastion  — точка входа в кластер
+#
+# Подсеть: 192.168.59.0/24 (не конфликтует с platform/devsecops)
+#
+# RAM-профиль (~6.8 GB суммарно):
+#   gitlab-pub  (broken):  4 GB    (GitLab Omnibus minimum)
+#   redmine-int (missing): 768 MB  (только OS+SSH+ufw)
+#   matter-int  (ok):      1 GB    (Mattermost + nginx HTTPS)
+#   bastion-mg:            1 GB    (Ansible install)
+#
+# В отличие от других стендов, VAGRANT_SCENARIO здесь НЕ читается:
+# конфигурация фиксирована и одинакова при каждом `vagrant up`.
+
+NODES = [
+  {
+    name:     "node-gitlab-pub",
+    ip:       "192.168.59.10",
+    desc:     "GitLab CE — public role / broken (HTTP only, нет HTTPS)",
+    role:     "public",
+    scenario: "broken",
+    script:   "../../devsecops/cluster-base/provision/node_gitlab.sh",
+    memory:   4096,
+    cpus:     1,
+    control:  false,
+  },
+  {
+    name:     "node-redmine-int",
+    ip:       "192.168.59.20",
+    desc:     "Redmine — internal role / missing (не установлен)",
+    role:     "internal",
+    scenario: "missing",
+    script:   "../../devsecops/cluster-base/provision/node_redmine.sh",
+    memory:   768,
+    cpus:     1,
+    control:  false,
+  },
+  {
+    name:     "node-mattermost-int",
+    ip:       "192.168.59.30",
+    desc:     "Mattermost — internal role / ok (HTTPS, эталонное состояние)",
+    role:     "internal",
+    scenario: "ok",
+    script:   "../../devsecops/cluster-base/provision/node_mattermost.sh",
+    memory:   1024,
+    cpus:     1,
+    control:  false,
+  },
+  {
+    name:     "node-bastion-mg",
+    ip:       "192.168.59.5",
+    desc:     "Bastion + Ansible control",
+    role:     "bastion",
+    scenario: "broken",
+    script:   "provision/node_bastion_control.sh",
+    memory:   1024,
+    cpus:     1,
+    control:  true,
+  },
+].freeze
+
+Vagrant.configure("2") do |config|
+  config.vm.box = "ubuntu/jammy64"
+  config.vm.box_check_update = false
+  config.vm.boot_timeout = 600
+  config.vm.synced_folder ".", "/vagrant", disabled: true
+
+  NODES.each do |node|
+    config.vm.define node[:name] do |vm_config|
+      vm_config.vm.hostname = node[:name]
+      vm_config.vm.network "private_network", ip: node[:ip]
+
+      vm_config.vm.provider "virtualbox" do |vb|
+        vb.name   = node[:name]
+        vb.memory = node[:memory]
+        vb.cpus   = node[:cpus]
+        vb.gui    = false
+        vb.customize ["modifyvm", :id, "--natdnshostresolver1", "on"]
+      end
+
+      if node[:control]
+        vm_config.vm.provision "file",
+          source: "../../../playbooks",
+          destination: "/tmp/playbooks"
+      end
+
+      # Per-node SCENARIO + ROLE — это и есть «смешанность»
+      vm_config.vm.provision "shell",
+        path: node[:script],
+        env: {
+          "SCENARIO" => node[:scenario],
+          "ROLE"     => node[:role],
+        }
+
+      vm_config.vm.post_up_message =
+        "#{node[:name]} (#{node[:ip]}) — #{node[:desc]}"
+    end
+  end
+end

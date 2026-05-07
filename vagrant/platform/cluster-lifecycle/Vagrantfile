@@ -1,0 +1,71 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+#
+# Сценарий "Production Lifecycle": dev → staging → prod + Ansible control-node.
+# Сеть: 192.168.57.0/24
+# Запуск: cd vagrant/cluster-lifecycle && vagrant up
+
+NODES = [
+  {
+    name:    "node-dev",
+    ip:      "192.168.57.10",
+    script:  "provision/node-dev.sh",
+    memory:  512,
+    desc:    "Target DEV — HTTP only, weak SSH, no firewall",
+    control: false
+  },
+  {
+    name:    "node-staging",
+    ip:      "192.168.57.20",
+    script:  "provision/node-staging.sh",
+    memory:  512,
+    desc:    "Target STAGING — HTTPS, ufw активен, SSH средне настроен",
+    control: false
+  },
+  {
+    name:    "node-prod",
+    ip:      "192.168.57.30",
+    script:  "provision/node-prod.sh",
+    memory:  512,
+    desc:    "Target PROD — HTTPS, hardened SSH, ufw с правилами",
+    control: false
+  },
+  {
+    name:    "node-control-lc",
+    ip:      "192.168.57.5",
+    script:  "provision/node_control.sh",
+    memory:  768,
+    desc:    "Ansible control-node (lifecycle) — выполняет плейбуки на target-узлах",
+    control: true
+  }
+].freeze
+
+Vagrant.configure("2") do |config|
+  config.vm.box = "ubuntu/jammy64"
+  config.vm.box_check_update = false
+  config.vm.synced_folder ".", "/vagrant", disabled: true
+
+  NODES.each do |node|
+    config.vm.define node[:name] do |vm_config|
+      vm_config.vm.hostname = node[:name]
+      vm_config.vm.network "private_network", ip: node[:ip]
+
+      vm_config.vm.provider "virtualbox" do |vb|
+        vb.name   = node[:name]
+        vb.memory = node[:memory]
+        vb.cpus   = 1
+        vb.gui    = false
+        vb.customize ["modifyvm", :id, "--natdnshostresolver1", "on"]
+      end
+
+      if node[:control]
+        vm_config.vm.provision "file",
+          source: "../../../playbooks",
+          destination: "/tmp/playbooks"
+      end
+
+      vm_config.vm.provision "shell", path: node[:script]
+      vm_config.vm.post_up_message = "#{node[:name]} (#{node[:ip]}) готов. #{node[:desc]}"
+    end
+  end
+end

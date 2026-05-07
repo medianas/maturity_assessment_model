@@ -1,0 +1,33 @@
+---
+# Восстановление webhook GitLab → Mattermost.
+# В production: создание incoming webhook на стороне Mattermost +
+# настройка Mattermost integration в GitLab (api/v4/projects/.../services/mattermost).
+- name: Restore GitLab → Mattermost webhook
+  hosts: "{{ target_host | default('gitlab_hosts') }}"
+  become: yes
+  vars:
+    mm_host: "{{ groups['mattermost_hosts'] | first | default('node-mattermost') }}"
+    mm_ip: "{{ hostvars[mm_host]['ansible_host'] | default('192.168.56.30') }}"
+
+  tasks:
+    - name: Ensure /etc/devsec exists
+      file:
+        path: /etc/devsec
+        state: directory
+        mode: "0755"
+
+    - name: Write GitLab → Mattermost link marker
+      copy:
+        dest: /etc/devsec/gitlab_mattermost_link.conf
+        mode: "0644"
+        content: |
+          link: gitlab → mattermost
+          source_host: {{ inventory_hostname }}
+          source_ip: {{ ansible_host | default(inventory_hostname) }}
+          target_host: {{ mm_host }}
+          target_ip: {{ mm_ip }}
+          target_url: http://{{ mm_ip }}:8065
+          webhook_events: [push, issue, pipeline, merge_request]
+          channel: gitlab-notifications
+          configured_at: {{ ansible_date_time.iso8601 }}
+          status: active

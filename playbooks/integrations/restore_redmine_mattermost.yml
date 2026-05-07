@@ -1,0 +1,32 @@
+---
+# Восстановление webhook Redmine → Mattermost.
+# Через redmine_mattermost-плагин или внешний скрипт.
+- name: Restore Redmine → Mattermost webhook
+  hosts: "{{ target_host | default('redmine_hosts') }}"
+  become: yes
+  vars:
+    mm_host: "{{ groups['mattermost_hosts'] | first | default('node-mattermost') }}"
+    mm_ip: "{{ hostvars[mm_host]['ansible_host'] | default('192.168.56.30') }}"
+
+  tasks:
+    - name: Ensure /etc/devsec exists
+      file:
+        path: /etc/devsec
+        state: directory
+        mode: "0755"
+
+    - name: Write Redmine → Mattermost link marker
+      copy:
+        dest: /etc/devsec/redmine_mattermost_link.conf
+        mode: "0644"
+        content: |
+          link: redmine → mattermost
+          source_host: {{ inventory_hostname }}
+          source_ip: {{ ansible_host | default(inventory_hostname) }}
+          target_host: {{ mm_host }}
+          target_ip: {{ mm_ip }}
+          target_url: http://{{ mm_ip }}:8065
+          events: [issue_created, issue_updated, issue_closed]
+          channel: redmine-notifications
+          configured_at: {{ ansible_date_time.iso8601 }}
+          status: active

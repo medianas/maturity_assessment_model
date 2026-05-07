@@ -1,0 +1,65 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+#
+# cluster-lifecycle v2 — distributed DevOps stack, default scenario=missing.
+# Подсеть: 192.168.57.0/24
+#
+# СЕМАНТИКА (наследие v1: dev/staging/prod): «жизненный цикл, ранняя стадия» —
+# моделирует dev-окружение, где сервисы ещё только разворачиваются, либо
+# legacy-стенд, который лет 10 жил без DevSecOps-практик: сервисов может
+# не быть вовсе (missing), либо они есть, но интеграции отсутствуют (broken).
+# Default scenario = missing — самый дешёвый по RAM прогон для smoke-теста.
+#
+# Сценарии те же 3: missing / broken / ok (см. cluster-base/Vagrantfile).
+
+SCENARIO = ENV['VAGRANT_SCENARIO'] || 'missing'
+unless %w[missing broken ok].include?(SCENARIO)
+  raise "VAGRANT_SCENARIO must be one of: missing, broken, ok (got: #{SCENARIO})"
+end
+
+gitlab_mem  = SCENARIO == 'missing' ? 768  : 4096
+redmine_mem = SCENARIO == 'missing' ? 768  : 1536
+matter_mem  = SCENARIO == 'missing' ? 768  : 1024
+control_mem = 1024
+
+NODES = [
+  { name: "node-gitlab-lc",     ip: "192.168.57.10", script: "provision/node_gitlab.sh",     memory: gitlab_mem,  cpus: 1, desc: "GitLab CE", control: false },
+  { name: "node-redmine-lc",    ip: "192.168.57.20", script: "provision/node_redmine.sh",    memory: redmine_mem, cpus: 1, desc: "Redmine + PostgreSQL", control: false },
+  { name: "node-mattermost-lc", ip: "192.168.57.30", script: "provision/node_mattermost.sh", memory: matter_mem,  cpus: 1, desc: "Mattermost + PostgreSQL", control: false },
+  { name: "node-control-lc",    ip: "192.168.57.5",  script: "provision/node_control.sh",    memory: control_mem, cpus: 1, desc: "Ansible control-node", control: true },
+].freeze
+
+Vagrant.configure("2") do |config|
+  config.vm.box = "ubuntu/jammy64"
+  config.vm.box_check_update = false
+  config.vm.boot_timeout = 600
+  config.vm.synced_folder ".", "/vagrant", disabled: true
+
+  NODES.each do |node|
+    config.vm.define node[:name] do |vm_config|
+      vm_config.vm.hostname = node[:name]
+      vm_config.vm.network "private_network", ip: node[:ip]
+
+      vm_config.vm.provider "virtualbox" do |vb|
+        vb.name   = node[:name]
+        vb.memory = node[:memory]
+        vb.cpus   = node[:cpus]
+        vb.gui    = false
+        vb.customize ["modifyvm", :id, "--natdnshostresolver1", "on"]
+      end
+
+      if node[:control]
+        vm_config.vm.provision "file",
+          source: "../../../playbooks",
+          destination: "/tmp/playbooks"
+      end
+
+      vm_config.vm.provision "shell",
+        path: node[:script],
+        env: { "SCENARIO" => SCENARIO }
+
+      vm_config.vm.post_up_message =
+        "#{node[:name]} (#{node[:ip]}) — #{node[:desc]} [scenario=#{SCENARIO}]"
+    end
+  end
+end
