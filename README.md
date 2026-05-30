@@ -14,6 +14,120 @@
 - **Реальная автоматизация** через выделенную Ansible control-node (4-я ВМ в каждом кластере)
 - **Юнит-тесты**: 37 pytest-тестов
 
+## Адаптация под любой проект
+
+Проект устроен как настраиваемая модель оценки зрелости: один и тот же
+пайплайн можно применять к разным организациям, стендам и наборам внутренних
+требований. Меняются входные узлы, профиль аудита, правила исправлений,
+Ansible-плейбуки и рекомендации, а общий цикл остаётся одинаковым:
+
+```text
+IP-адреса + SSH-доступ + профиль
+        -> аудит
+        -> выявление несоответствий
+        -> выбор правил исправления
+        -> запуск Ansible
+        -> отчёт по уровню зрелости
+```
+
+### Где задавать IP-адреса машин
+
+Для обычного запуска целевые машины передаются через CLI:
+
+```bash
+python cli.py --ip 10.10.1.15 10.10.1.16 10.10.1.17 \
+              --user admin --password pass \
+              --profile admin \
+              --format json --output report.json
+```
+
+Для демонстрационных кластеров IP-адреса заданы в словаре `CLUSTERS`:
+
+- `run_demo_cluster.py` — реальный аудит, mock-automation;
+- `run_demo_cluster_real.py` — реальный аудит и реальный запуск Ansible через control-node.
+
+Пример структуры:
+
+```python
+CLUSTERS = {
+    "base": {
+        "title": "Infrastructure Maturity Baseline",
+        "nodes": [
+            {"ip": "192.168.56.10", "name": "node-critical"},
+            {"ip": "192.168.56.20", "name": "node-app"},
+            {"ip": "192.168.56.30", "name": "node-secure"},
+        ],
+    },
+}
+```
+
+### Где задавать правила и профили
+
+Основная точка настройки — `config.py`.
+
+`AUDIT_PROFILES` определяет, какие проверки входят в профиль:
+
+```python
+AUDIT_PROFILES = {
+    "default": {
+        "checks": [
+            "service_availability",
+            "https_enabled",
+            "ssh_config",
+            "firewall_status"
+        ]
+    },
+    "admin": {
+        "checks": [
+            "service_availability",
+            "https_enabled",
+            "ssh_config",
+            "firewall_status",
+            "gitlab_integration",
+            "redmine_integration",
+            "mattermost_integration"
+        ]
+    }
+}
+```
+
+`CORRECTION_RULES` связывает найденное нарушение с корректирующим действием:
+
+```python
+CORRECTION_RULES = {
+    "https_not_enabled": {
+        "description": "HTTPS не включён",
+        "actions": [
+            {
+                "id": "enable_https",
+                "description": "Включить HTTPS",
+                "playbook": "playbooks/security/enable_https.yml",
+                "priority": 1
+            }
+        ],
+        "severity": "HIGH"
+    }
+}
+```
+
+Так модель можно подстроить под конкретную организацию: заменить набор
+проверок, приоритеты, описания, рекомендации и Ansible-плейбуки. Например,
+вместо GitLab/Redmine/Mattermost можно описать собственный Git-сервер,
+Service Desk и корпоративный мессенджер.
+
+### Как адаптировать требования
+
+1. Добавить или изменить профиль в `AUDIT_PROFILES`.
+2. Убедиться, что нужная проверка реализована в `audit.py`.
+3. Добавить правило исправления в `CORRECTION_RULES`.
+4. Связать имя проверки с правилом в `decision.py`.
+5. Добавить или заменить Ansible-плейбук в `playbooks/`.
+6. Запустить CLI с IP-адресами нужных машин.
+
+Важно: IP-адреса, профили, рекомендации и правила исправления меняются
+конфигурационно. Добавление принципиально нового типа проверки требует
+небольшой доработки `audit.py` и связи с правилом в `decision.py`.
+
 ## Установка
 
 ```bash
