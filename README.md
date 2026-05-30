@@ -166,3 +166,39 @@ cd vagrant/merged/cluster-merged && vagrant up && cd ../../..
 python run_demo_cluster_real.py merged                # оба домена в одном отчёте
 # Всего 7 стендов: 3 platform + 3 devsecops + 1 merged.
 ```
+
+## Документация
+### Диаграмма вариантов использования (Use Case Diagram)
+<img width="974" height="169" alt="image" src="https://github.com/user-attachments/assets/872a0f0f-47d2-447f-9e59-f3837299e2f8" />
+
+
+
+### Диаграмма последовательности (Sequence Diagram)
+<img width="974" height="845" alt="image" src="https://github.com/user-attachments/assets/99599bfb-79eb-4cde-90cd-ffe433a996bb" />
+
+
+
+### Диаграмма классов (Class Diagram)
+<img width="974" height="354" alt="image" src="https://github.com/user-attachments/assets/fb4c62c2-f2b5-42d9-b32b-a46bc41659ad" />
+
+
+
+### Диаграмма компонентов (Component Diagram)
+<img width="974" height="409" alt="image" src="https://github.com/user-attachments/assets/caaee7dc-7f2d-4d41-99d4-41039202ade8" />
+
+
+
+### Диаграмма деятельности (Activity Diagram)
+<img width="900" height="1424" alt="image" src="https://github.com/user-attachments/assets/b9b66b22-d703-44de-8506-50798916bb9b" />
+
+
+
+### Диаграмма сущностей и их связей (ER Diagram)
+<img width="974" height="1342" alt="image" src="https://github.com/user-attachments/assets/72b79576-7e74-4051-99ca-a35c57750ebb" />
+
+
+
+### Диаграмма пакетов (Package Diagram)
+<img width="974" height="336" alt="image" src="https://github.com/user-attachments/assets/f7623d8a-673b-4a9a-aa3c-c8be8cd429dd" />
+
+
